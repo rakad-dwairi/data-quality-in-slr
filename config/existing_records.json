@@ -1,0 +1,115 @@
+{
+  "run_directory": "runs/existing_records",
+  "search": {
+    "enabled": false,
+    "require_all_sources": true,
+    "email": "rakad.aldwairi1@alu.uclm.es",
+    "sources": [
+      "scopus",
+      "openalex",
+      "arxiv",
+      "crossref"
+    ],
+    "topics": [
+      "quality",
+      "missingness",
+      "noise",
+      "distribution",
+      "selection",
+      "preprocessing",
+      "time",
+      "iso"
+    ],
+    "start": "1900-01-01",
+    "end": "2026-10-21",
+    "max_pages": 0,
+    "crossref_rows": 1000,
+    "scopus_pagination": "cursor",
+    "scopus_view": "STANDARD"
+  },
+  "imports": [
+    {
+      "source": "historical_multisource",
+      "path": "archive/previous_runs/slr_available_sources/run_20261020T164109_545827Z/observations.jsonl"
+    },
+    {
+      "source": "historical_ieee",
+      "path": "archive/previous_runs/slr_ieee/run_20261020T201347_021658Z/observations.jsonl"
+    }
+  ],
+  "deduplication": {
+    "similarity": 95,
+    "block_limit": 200,
+    "skip_fuzzy": false
+  },
+  "model": {
+    "name": "qwen3:8b",
+    "base_url": "http://127.0.0.1:11434",
+    "allow_remote": false,
+    "temperature": 0,
+    "context_tokens": 32768,
+    "max_output_tokens": 8192,
+    "timeout_seconds": 300
+  },
+  "screening": {
+    "limit": 0,
+    "retry_errors": true,
+    "require_abstract": true
+  },
+  "fulltext": {
+    "directory": "inputs/fulltext",
+    "manifest": "inputs/fulltext_manifest.csv",
+    "download_open_access": true,
+    "max_download_mb": 50,
+    "timeout_seconds": 90,
+    "min_text_chars": 1000
+  },
+  "reviews_file": "inputs/reviews.csv",
+  "protocol": {
+    "version": "draft-1.0-plan-2026-10-21",
+    "frozen": false,
+    "source_plan": "../Systematic Literature Review Plan for Data Quality in Recommender Systems Using ISO_IEC 5259.pdf",
+    "objective": "Identify, classify and appraise data-quality measurements in recommender systems, their operationalisation, validation, consequences and justified ISO/IEC 5259-2 correspondence.",
+    "scope": "Any recommender paradigm; interaction, user, item/content, exposure, contextual, temporal, evaluation and synthetic/augmented data. The data property must itself be measured, manipulated, diagnosed or empirically assessed. Data-quality assessment can stand alone; downstream improvement and explicit ISO terminology are not required.",
+    "criteria": {
+      "recommender_context": "Trains, evaluates, operates or analyses a recommendation task; recommendation cannot be incidental.",
+      "data_quality_construct": "Investigates a property of recommender data; incidental sparsity/noise descriptions are insufficient.",
+      "operational_evidence": "Provides a procedure, measure, controlled manipulation or empirical data-quality assessment.",
+      "eligible_data_object": "Interaction, profile, item/content, exposure, context, temporal, evaluation, synthetic or other task-relevant recommender data; algorithm architecture or output metrics alone are insufficient.",
+      "primary_research": "Primary empirical or methodological research, including original evidence in mixed studies. Surveys/tutorials/editorials are secondary literature. Substantive workshop reports may qualify; preprints remain flagged provisional."
+    },
+    "allowed_languages": [],
+    "language_restriction_justification": "",
+    "publication_policy": "Journal/conference and substantive workshop primary studies; preprints provisional pending published-version linkage.",
+    "principal_exclusion_hierarchy": [
+      "NOT_RECSYS",
+      "NO_DATA_QUALITY_CONSTRUCT",
+      "NO_OPERATIONAL_ASSESSMENT",
+      "WRONG_STUDY_TYPE",
+      "DUPLICATE_COMPANION_REPORT",
+      "INSUFFICIENT_FULL_TEXT",
+      "LANGUAGE_RESTRICTION"
+    ],
+    "appraisal_domains": [
+      "construct_clarity",
+      "measurement_transparency",
+      "reference_appropriateness",
+      "design_strength",
+      "confounding_control",
+      "evaluation_validity",
+      "statistical_evidence",
+      "robustness",
+      "generalisability",
+      "reproducibility"
+    ],
+    "iso_codebook": {},
+    "research_questions": {
+      "RQ1": "Which data objects and data-quality conditions have been empirically investigated?",
+      "RQ2": "How are conditions defined and measured, against which references and requirements?",
+      "RQ3": "What validation and reliability evidence supports the measures?",
+      "RQ4": "Which ISO/IEC 5259-2 correspondences are justified, and with what uncertainty?",
+      "RQ5": "How do measured conditions and interventions relate to recommender outcomes?",
+      "RQ6": "Which contexts moderate the relationships and where are measurement gaps?"
+    }
+  }
+}

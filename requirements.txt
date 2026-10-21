@@ -1,0 +1,4 @@
+requests>=2.32.3,<3
+rapidfuzz>=3.9,<4
+bibtexparser==1.4.3
+pypdf>=5,<7

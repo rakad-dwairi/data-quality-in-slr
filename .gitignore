@@ -1,0 +1,14 @@
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.idea/
+runs/
+archive/
+inputs/fulltext/*
+!inputs/fulltext/.gitkeep
+inputs/reviews.csv
+inputs/fulltext_manifest.csv
+inputs/date_checks.csv
