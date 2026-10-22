@@ -41,7 +41,7 @@ class ReadinessCheckTests(unittest.TestCase):
                 "email": "fixture@example.org",
                 "sources": ["scopus", "wos", "ieee", "openalex", "arxiv", "crossref"],
                 "topics": ["quality", "missingness", "noise", "distribution", "selection", "preprocessing", "time", "iso"],
-                "start": "1900-01-01", "end": "2026-10-21",
+                "start": "2016-01-01", "end": "2026-10-21",
                 "max_pages": 0, "crossref_rows": 1000,
                 "scopus_pagination": "cursor", "scopus_view": "STANDARD",
             },

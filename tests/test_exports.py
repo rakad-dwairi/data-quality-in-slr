@@ -15,7 +15,7 @@ class ExportTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.config = {"_project_dir": str(self.root), "reviews_file": "reviews.csv",
-                       "search": {"start": "1900-01-01", "end": "2026-10-21"}}
+                       "search": {"start": "2016-01-01", "end": "2026-10-21"}}
         self.pdf_text = self.root / "synthetic.txt"
         self.pdf_text.write_text("Synthetic test text. " * 100, encoding="utf-8")
         self.ta = {"record_id": "R_fixture", "report_id": "R_fixture", "title": "Synthetic fixture",

@@ -112,7 +112,7 @@ class OfflineResumeTests(unittest.TestCase):
             "_project_dir": str(self.root), "run_directory": "runs/donor",
             "search": {"enabled": True, "email": "fixture@example.invalid",
                        "sources": ["openalex"], "topics": ["quality"],
-                       "start": "1900-01-01", "end": "2026-10-21",
+                       "start": "2016-01-01", "end": "2026-10-21",
                        "max_pages": 1, "crossref_rows": 1000,
                        "scopus_pagination": "cursor", "scopus_view": "STANDARD"},
             "imports": [], "deduplication": {"similarity": 95, "block_limit": 200},

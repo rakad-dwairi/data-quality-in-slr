@@ -157,7 +157,7 @@ class OfflineCLIIntegrationTests(unittest.TestCase):
         self.config = {
             "run_directory": "runs/synthetic_review",
             "search": {"enabled": False, "email": "", "sources": [], "topics": [],
-                       "start": "1900-01-01", "end": "2026-10-21",
+                       "start": "2016-01-01", "end": "2026-10-21",
                        "max_pages": 0, "crossref_rows": 1000},
             "imports": [{"source": "synthetic_manual", "path": "inputs/imports/synthetic.csv"}],
             "deduplication": {"similarity": 95, "block_limit": 200, "skip_fuzzy": False},

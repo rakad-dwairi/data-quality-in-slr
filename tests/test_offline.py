@@ -140,7 +140,7 @@ class ManualImportTests(OfflineTestCase):
         config = {
             "_project_dir": str(self.root),
             "search": {"enabled": False, "sources": [], "topics": [],
-                       "start": "1900-01-01", "end": "2026-10-21"},
+                       "start": "2016-01-01", "end": "2026-10-21"},
             "imports": [{"source": "synthetic_export", "path": source.name}],
         }
         run = self.root / "run"
@@ -167,7 +167,7 @@ class ManualImportTests(OfflineTestCase):
         config = {
             "_project_dir": str(self.root),
             "search": {"enabled": False, "sources": [], "topics": [],
-                       "start": "1900-01-01", "end": "2026-10-21"},
+                       "start": "2016-01-01", "end": "2026-10-21"},
             "imports": [{"source": "fixture", "path": source.name},
                         {"source": "fixture", "path": duplicate.name}],
         }
