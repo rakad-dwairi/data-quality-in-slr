@@ -19,7 +19,7 @@ class ExportTests(unittest.TestCase):
         self.pdf_text = self.root / "synthetic.txt"
         self.pdf_text.write_text("Synthetic test text. " * 100, encoding="utf-8")
         self.ta = {"record_id": "R_fixture", "report_id": "R_fixture", "title": "Synthetic fixture",
-                   "abstract": "Synthetic abstract", "date": "2001-01-01", "ai_decision": "include",
+                   "abstract": "Synthetic abstract", "date": "2020-01-01", "ai_decision": "include",
                    "screening_status": "assessed", "input_sha256": "ta_fixture_hash"}
         self.ft = {**self.ta, "input_sha256": "ft_fixture_hash", "text_complete": True,
                    "full_text_status": "ready", "full_text_path": str(self.pdf_text),

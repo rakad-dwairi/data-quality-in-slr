@@ -1,6 +1,6 @@
-# Offline verification — 21 October 2026
+# Offline verification — 23 October 2026
 
-Latest recovery result: **122 tests passed, 0 failures, 0 errors, 0 blocked network attempts**. The initial verification passed 98 tests. The later suite also covers adaptive Scopus year partitioning and transfer into a fresh run; see the recovery section below. Both use the project's Python 3.12 virtual environment, with real socket connections and DNS disabled before discovery.
+Latest recovery result: **170 tests passed, 0 failures, 0 errors, 0 blocked network attempts**. The initial verification passed 98 tests; the Scopus recovery suite passed 122. The latest suite also covers conservative evidence normalization, saved-response revalidation, screening recovery, model-outage stops and Windows source snapshots. Verification used Python 3.12, with real socket connections and DNS disabled before discovery.
 
 ```bash
 source .venv/bin/activate
@@ -52,3 +52,11 @@ The new `prepare_resume.py` is an entirely offline transfer for a stopped API-on
 The recovery configuration passes guarded read-only readiness with all four requested sources selected, zero errors and zero database/model requests. The current provider adapter hash was checked against the original frozen snapshot and is unchanged, so unaffected download identities remain compatible. The active owner process was not stopped or restarted, and migration was tested only with temporary synthetic runs. No live offset entitlement or screening-accuracy claim follows from these tests.
 
 Use [the recovery instructions](restart_after_scopus.md) after stopping the original process yourself. Do not delete the donor before the one-time preparation succeeds.
+
+## Recovery from the supplied screening failures
+
+All three owner-supplied failed title/abstract responses were replayed offline through the integrated cache-revalidation path with model construction and inference forbidden. Matching generation keys, prompts, inputs, model digests and raw replies were preserved. Each became a valid `uncertain` assessment: unsupported claims were downgraded to `unclear`, and no paper was included, excluded or human-confirmed by this repair. The private sample archive remained unchanged and is excluded from the update package.
+
+The 170-test suite covers unique exact passage-ID recovery, unique whitespace-only source spans, rejection of punctuation/paraphrase/ambiguous matches, preserved own-study attribution rules, unchanged strict validation, zero-inference cache recovery, immutable original attempt events, original-run preservation, committed SQLite WAL records, source/artifact tampering, model-outage stops, bounded screening and legacy/new Windows newline handling. Two existing synthetic export fixtures were updated to use a year inside the configured review window; production date criteria were unchanged.
+
+Use [the screening recovery instructions](screening_recovery.md) to prepare a separate run from the Windows donor's frozen configuration and cached evidence, then run a three-assessment trial yourself. No real review pipeline, database search, PDF download or model request was executed during this verification. Live Windows execution and scientific screening accuracy still require the owner's bounded trial and review.

@@ -140,7 +140,7 @@ class OfflineCLIIntegrationTests(unittest.TestCase):
         row = {
             "title": "Synthetic recommender metadata quality integration fixture",
             "abstract": FIXTURE_QUOTE, "authors": "Example, Alpha; Example, Beta",
-            "date": "2001-01-01", "date_basis": "synthetic_fixture",
+            "date": "2020-01-01", "date_basis": "synthetic_fixture",
             "doi": "10.9999/synthetic-cli-fixture", "venue": "Synthetic Fixture Venue",
             "publication_type": "journal-article", "oa_pdf_url": "",
         }
@@ -289,6 +289,38 @@ class OfflineCLIIntegrationTests(unittest.TestCase):
         self.assertFalse(self.common.read_json(self.out / "summary.json")["retrieval"]["complete"])
         self.assertEqual(SyntheticOllama.calls, 0)
         self.assertEqual(SyntheticOllama.preflights, 0)
+
+    def test_model_outage_exports_pending_results_and_stops_before_fulltext(self):
+        with mock.patch.object(SyntheticOllama, "call", side_effect=self.screening.ModelUnavailable("Synthetic offline server failure")), \
+                mock.patch.object(self.fulltext, "prepare_fulltexts") as prepare:
+            self.command("all", expected=1)
+        prepare.assert_not_called()
+        self.assertIn("model unavailable", self.last_stderr)
+        rows = self.common.read_csv(self.out / "03_title_abstract/screening.csv")
+        self.assertEqual(rows[0]["screening_status"], "model_unavailable")
+        self.assertTrue((self.out / "checkpoints/screening.sqlite").exists())
+
+    def test_all_stops_at_title_abstract_limit_but_explicit_screen_can_return(self):
+        def pending(records, stage, config, out):
+            self.assertEqual(stage, "title_abstract")
+            return [{**row, **self.screening._uncertain("Synthetic call limit.", "pending_limit"),
+                     "input_sha256": self.screening.screening_input_hash(row, stage)} for row in records]
+
+        with mock.patch.object(self.screening, "screen_records", side_effect=pending), \
+                mock.patch.object(self.fulltext, "prepare_fulltexts") as prepare:
+            self.command("all", expected=1)
+            self.assertIn("reached its configured limit", self.last_stderr)
+            prepare.assert_not_called()
+            self.command("screen")
+            prepare.assert_not_called()
+
+    def test_chunked_model_outage_is_detected_without_changing_uncertain_rows(self):
+        row = {"screening_status": "chunked_partial", "ai_decision": "uncertain",
+               "chunk_errors_json": json.dumps([{"packet_index": 2, "status": "model_unavailable"}])}
+        before = json.dumps(row, sort_keys=True)
+        with self.assertRaisesRegex(ValueError, "model unavailable for 1 records"):
+            self.cli.require_available_model([row], "Synthetic full-text screening")
+        self.assertEqual(json.dumps(row, sort_keys=True), before)
 
     def test_all_stages_reviews_and_resume_use_only_temporary_synthetic_evidence(self):
         sentinel = self.root / "unrelated_existing_run" / "preserve.txt"

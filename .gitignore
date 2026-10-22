@@ -12,3 +12,6 @@ inputs/fulltext/*
 inputs/reviews.csv
 inputs/fulltext_manifest.csv
 inputs/date_checks.csv
+screening_failure_samples*.zip
+config/model_probe.json
+config/screening_recovery.json

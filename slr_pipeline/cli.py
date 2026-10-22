@@ -22,6 +22,7 @@ BIB = ["record_id", "report_id", "study_id", "title", "abstract", "authors", "da
        "venue", "publication_type", "source", "sources", "url", "oa_pdf_url", "provenance"]
 SCREEN = BIB + ["ai_decision", "ai_reason_code", "ai_rationale", "screening_status", "input_sha256",
                 "criteria_json", "evidence_json", "model", "model_digest", "prompt_sha256",
+                "evidence_validation_version", "evidence_adjustments_json",
                 "human_decision", "human_reason_code", "human_status", "human_reviewers", "effective_decision"]
 FULL = SCREEN + ["full_text_path", "full_text_sha256", "full_text_file_sha256", "full_text_status", "full_text_error", "text_complete",
                  "chunk_count", "chunks_completed", "chunk_errors_json", "chunk_fingerprints_json",
@@ -86,7 +87,10 @@ def initialize(config, out):
         # Freeze actual implementation text, without credentials or user data.
         from .common import atomic_text
         for source in sorted((PROJECT / "slr_pipeline").glob("*.py")):
-            atomic_text(out / "code_snapshot" / source.name, source.read_text(encoding="utf-8"))
+            # Preserve Windows CRLF bytes: read_text's universal-newline mode
+            # previously made snapshots disagree with their raw source hashes.
+            with source.open(encoding="utf-8", newline="") as handle:
+                atomic_text(out / "code_snapshot" / source.name, handle.read())
         protocol_path = project_path(config, config["protocol"].get("source_plan", ""))
         write_json(out / "protocol_snapshot.json", {"protocol": config["protocol"],
                    "source_plan_sha256": file_hash(protocol_path) if protocol_path.is_file() else None,
@@ -177,6 +181,23 @@ def reviewed_stages(config, out, ta=None, ft=None):
 def advances_to_fulltext(row):
     return row.get("effective_decision") in {"include", "uncertain"} and (
         bool(row.get("human_decision")) or row.get("screening_status") not in {"pending_limit", "model_unavailable"})
+
+
+def require_available_model(rows, stage):
+    """An exported pending queue is not a completed model screening run."""
+    failed = 0
+    for row in rows:
+        unavailable = row.get("screening_status") == "model_unavailable"
+        if not unavailable and row.get("chunk_errors_json"):
+            try:
+                unavailable = any(error.get("status") == "model_unavailable"
+                                  for error in json.loads(row["chunk_errors_json"]))
+            except (ValueError, TypeError, AttributeError):
+                pass
+        failed += int(unavailable)
+    if failed:
+        raise ValueError(f"{stage}: model unavailable for {failed} records. Pending CSVs and completed checkpoints were saved. "
+                         "Fix Ollama, then resume this screening stage; downstream stages were not started.")
 
 
 def date_window_status(row, config):
@@ -404,6 +425,10 @@ def main(argv=None):
                 snapshot_stage(out, ta, "title_abstract")
                 end_stage(out, "screen", ta)
                 export_results(config, out, ta=ta)
+                require_available_model(ta, "Title/abstract screening")
+                if args.stage == "all" and any(row.get("screening_status") == "pending_limit" for row in ta):
+                    raise ValueError("Title/abstract screening reached its configured limit. Saved results can be resumed; "
+                                     "full-text preparation was not started while title/abstract work remains pending.")
             if args.stage in {"all", "fulltext"}:
                 from .fulltext import prepare_fulltexts
                 from .screening import screen_records
@@ -419,6 +444,7 @@ def main(argv=None):
                 snapshot_stage(out, ft, "full_text")
                 end_stage(out, "fulltext", ft)
                 export_results(config, out, ft=ft)
+                require_available_model(ft, "Full-text screening")
             if args.stage in {"export", "deduplicate", "retrieve"}:
                 export_results(config, out)
             manifest = read_json(out / "manifest.json")

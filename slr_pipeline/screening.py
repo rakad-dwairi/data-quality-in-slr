@@ -15,9 +15,13 @@ from urllib.parse import urlsplit
 
 import requests
 
-from .common import digest, utcnow, write_json
+from .common import digest, read_json, utcnow, write_json
+from .evidence import normalize_criteria
 
 PROMPT_VERSION = "2026-10-21.3"
+# Generation identity remains stable: the prompt/schema and model settings have
+# not changed. Deterministic post-processing has its own version and audit.
+EVIDENCE_VALIDATION_VERSION = "2026-10-23.1"
 CORE_CRITERIA = (
     "recommender_context", "investigated_data_property", "operational_assessment",
     "eligible_data_object", "primary_research",
@@ -394,9 +398,10 @@ class OllamaClient:
                 if not isinstance(result, dict):
                     raise AssessmentError("Ollama response must be a JSON object")
                 return result
-            except (requests.ConnectionError, requests.Timeout):
+            except (requests.ConnectionError, requests.Timeout) as exc:
                 if attempt == 1:
-                    raise ModelUnavailable("Ollama connection failed twice; completed records are checkpointed. Restart the server and resume.") from None
+                    raise ModelUnavailable(f"Ollama request failed twice; last error: {type(exc).__name__}. "
+                                           "Completed records are checkpointed. Check the server and resume.") from None
                 time.sleep(2)
             except requests.RequestException as exc:
                 raise AssessmentError(f"Model request failed ({type(exc).__name__})") from None
@@ -441,6 +446,80 @@ def _attempt_event(run_dir: Path, attempt_id: str, event: str, payload: dict) ->
     return path
 
 
+def _validated_response(raw_response: dict, evidence: dict, stage: str,
+                        names: list[str], protocol: dict, context: int, output: int) -> dict:
+    """Check a completed response without inference or invented evidence."""
+    if not isinstance(raw_response, dict):
+        raise AssessmentError("Ollama response must be a JSON object")
+    if raw_response.get("done_reason") == "length" or raw_response.get("done") is False:
+        raise AssessmentError("Model response was incomplete or hit its output limit")
+    if int(raw_response.get("prompt_eval_count", 0)) + output > context:
+        raise AssessmentError("Reported model context leaves insufficient reserved output capacity")
+    message = raw_response.get("message", {})
+    if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+        raise AssessmentError("Ollama response has no assistant JSON content")
+    data, adjustments = normalize_criteria(json.loads(message["content"]), evidence["passages"], stage)
+    result = _validate(data, evidence["passages"], stage, names, protocol)
+    result.update(evidence_validation_version=EVIDENCE_VALIDATION_VERSION,
+                  evidence_adjustments_json=_json(adjustments))
+    if adjustments:
+        result["ai_rationale"] = (
+            f"Evidence validation recorded {len(adjustments)} citation/criterion adjustments. "
+            "Supported source evidence was retained; unsupported judgements remain unclear. "
+            f"The resulting AI proposal is {result['ai_decision']}; interpretation requires review."
+        )
+    if evidence.get("source_packet"):
+        result.update(ai_decision="uncertain", ai_reason_code="UNCERTAIN",
+                      ai_rationale="Partial source packet; no whole-report eligibility decision. " + result["ai_rationale"])
+    return result
+
+
+def _revalidate_cached_response(cached, record, stage, config, run_dir, client, db,
+                                evidence, system_text, fingerprint, provenance):
+    """Reuse a saved generation only when its audit matches this exact input.
+
+    Original request/finished events remain immutable. A separate event records
+    the new validator's interpretation; no model call or call budget is used.
+    """
+    if cached[0] != "model_or_validation_error":
+        return None
+    audit_path = Path(run_dir) / "checkpoints/model_audit" / f"{fingerprint}.json"
+    try:
+        old_result, raw = json.loads(cached[1]), json.loads(cached[2])
+        audit = read_json(audit_path, {})
+        expected = {"record_id": str(record["record_id"]), "stage": stage,
+                    "assessment_fingerprint": fingerprint,
+                    "prompt_sha256": provenance["prompt_sha256"],
+                    "model": client.model, "model_digest": client.model_digest,
+                    "input_evidence": evidence, "system_prompt": system_text,
+                    "raw_response": raw, "result": old_result}
+        if not isinstance(audit, dict) or any(audit.get(k) != v for k, v in expected.items()):
+            return None
+        result = _validated_response(raw, evidence, stage, names=_criterion_names(stage, config.get("protocol", {})),
+                                     protocol=config.get("protocol", {}), context=client.context, output=client.output)
+    except (OSError, AssessmentError, ValueError, TypeError, KeyError, OverflowError):
+        return None
+    timestamp, revalidation_id = utcnow(), uuid4().hex
+    result.update(attempt_id=old_result.get("attempt_id", audit.get("attempt_id", "")),
+                  assessed_utc=timestamp, revalidation_id=revalidation_id,
+                  generation_created_utc=cached[4], cached_response_revalidated=True)
+    event = {"record_id": str(record["record_id"]), "stage": stage,
+             "operation": "saved_response_revalidation", "created_at": timestamp,
+             **provenance, "model": client.model, "prompt_version": PROMPT_VERSION,
+             "generation_attempt_id": result["attempt_id"], "generation_created_utc": cached[4],
+             "source_status": cached[0], "source_error": cached[3],
+             "input_evidence": evidence, "system_prompt": system_text,
+             "raw_response": raw, "result": result, "error": "",
+             "database_requests": 0, "model_requests": 0}
+    _attempt_event(run_dir, revalidation_id, "revalidated", event)
+    db.execute("UPDATE assessments SET status=?,result_json=?,error=?,created_at=? WHERE cache_key=?",
+               (result["screening_status"], _json(result), "", timestamp, fingerprint))
+    db.commit()
+    write_json(audit_path, {**event, "attempt_id": result["attempt_id"],
+                            "revalidation_id": revalidation_id})
+    return {**result, **provenance, "cache_reused": True}
+
+
 def _assess_input(record: dict, stage: str, config: dict, run_dir: Path,
                   client: OllamaClient, db: sqlite3.Connection, evidence: dict,
                   system_text: str, names: list[str], schema: dict, budget: dict) -> dict:
@@ -457,9 +536,15 @@ def _assess_input(record: dict, stage: str, config: dict, run_dir: Path,
         "model_digest": client.model_digest, "assessment_fingerprint": fingerprint,
         "cache_key": fingerprint, "prompt_sha256": prompt_hash,
     }
-    cached = db.execute("SELECT status, result_json FROM assessments WHERE cache_key=?", (fingerprint,)).fetchone()
+    cached = db.execute("SELECT status,result_json,raw_response,error,created_at FROM assessments WHERE cache_key=?", (fingerprint,)).fetchone()
     if cached and (cached[0] == "assessed" or not config.get("screening", {}).get("retry_errors", True)):
         return {**json.loads(cached[1]), **provenance, "cache_reused": True}
+    if cached:
+        recovered = _revalidate_cached_response(cached, record, stage, config, run_dir, client, db,
+                                                evidence, system_text, fingerprint, provenance)
+        if recovered is not None:
+            print(f"[{stage}] {record['record_id']}: revalidated saved response (no inference)", flush=True)
+            return recovered
     if client.unavailable_error:
         return {**_uncertain(client.unavailable_error, "model_unavailable"), **provenance, "cache_reused": False}
     if budget["limit"] and budget["attempted"] >= budget["limit"]:
@@ -480,17 +565,8 @@ def _assess_input(record: dict, stage: str, config: dict, run_dir: Path,
             {"role": "system", "content": system_text},
             {"role": "user", "content": _json(evidence)},
         ], schema)
-        if raw_response.get("done_reason") == "length" or raw_response.get("done") is False:
-            raise AssessmentError("Model response was incomplete or hit its output limit")
-        if int(raw_response.get("prompt_eval_count", 0)) + client.output > client.context:
-            raise AssessmentError("Reported model context leaves insufficient reserved output capacity")
-        message = raw_response.get("message", {})
-        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
-            raise AssessmentError("Ollama response has no assistant JSON content")
-        result = _validate(json.loads(message["content"]), evidence["passages"], stage, names, config.get("protocol", {}))
-        if evidence.get("source_packet"):
-            result.update(ai_decision="uncertain", ai_reason_code="UNCERTAIN",
-                          ai_rationale="Partial source packet; no whole-report eligibility decision. " + result["ai_rationale"])
+        result = _validated_response(raw_response, evidence, stage, names, config.get("protocol", {}),
+                                     client.context, client.output)
     except ModelUnavailable as exc:
         # Do not send another 25,000 calls to a stopped server. Cached records
         # remain reusable; all unattempted evidence stays pending/uncertain.
@@ -648,6 +724,9 @@ def _combine_packets(results: list[dict], names: list[str], total: int) -> dict:
     errors = [{"packet_index": index, "status": result.get("screening_status", "missing"),
                "reason": result.get("ai_rationale", "")}
               for index, result in enumerate(results, 1) if result.get("screening_status") != "assessed"]
+    adjustments = [{"packet_index": index, **adjustment}
+                   for index, result in enumerate(results, 1)
+                   for adjustment in json.loads(result.get("evidence_adjustments_json", "[]"))]
     return {
         "ai_decision": decision, "ai_reason_code": reason,
         "ai_rationale": f"Validated {len(completed)}/{total} full-text source packets. " +
@@ -657,6 +736,8 @@ def _combine_packets(results: list[dict], names: list[str], total: int) -> dict:
         "criteria_json": _json(criteria), "evidence_json": _json(all_evidence),
         "extraction_json": _json(extraction), "appraisal_json": _json(appraisal), "iso_mapping_json": _json(mappings),
         "screening_status": "chunked_complete" if complete else "chunked_partial",
+        "evidence_validation_version": EVIDENCE_VALIDATION_VERSION,
+        "evidence_adjustments_json": _json(adjustments),
         "chunk_count": total, "chunks_completed": len(completed),
         "chunk_fingerprints_json": _json(fingerprints), "chunk_errors_json": _json(errors),
         "assessment_fingerprint": digest({"aggregation_version": PROMPT_VERSION, "packet_fingerprints": fingerprints, "total": total}),
@@ -687,6 +768,7 @@ def screen_records(records: list[dict], stage: str, config: dict, run_dir: Path)
     client = OllamaClient(settings)
     db = _open_checkpoint(Path(run_dir) / "checkpoints" / "screening.sqlite")
     outputs = []
+    pending_limits = 0
     system_text = SYSTEM_PROMPT + "\nTrusted review protocol and required criteria:\n" + _json({"protocol": protocol, "required_criteria": names})
     try:
         for record in records:
@@ -735,7 +817,14 @@ def screen_records(records: list[dict], stage: str, config: dict, run_dir: Path)
             else:
                 result = _uncertain("Complete title/abstract and protocol exceed the configured context; no source text was truncated.", "context_exceeded")
             outputs.append({**record, **base, **result})
-            print(f"[{stage}] {record_id}: {result['ai_decision']} ({result['screening_status']})", flush=True)
+            if result["screening_status"] == "pending_limit":
+                pending_limits += 1
+                if pending_limits == 1:
+                    print(f"[{stage}] model-call limit reached; remaining unassessed records stay pending in the CSV.", flush=True)
+            else:
+                print(f"[{stage}] {record_id}: {result['ai_decision']} ({result['screening_status']})", flush=True)
+        if pending_limits:
+            print(f"[{stage}] {pending_limits} records remain pending because of the configured limit.", flush=True)
     finally:
         db.close()
         client.close()
