@@ -1,10 +1,10 @@
 # RecSys data-quality SLR
 
-For the Windows model-evidence failures investigated on 23 October 2026, use [screening recovery](docs/screening_recovery.md). It preserves the original run, copies completed searches/deduplication/checkpoints into a separate run, and can revalidate saved responses without generating them again. Do not rerun database retrieval for this repair.
+For the latest Windows screening samples, use [the eight-assessment calibration](docs/screening_calibration.md). The saved replies confuse a paper's own work, research type and topical eligibility; the revised prompt needs a new bounded trial. Completed searches, PDFs and audit history are retained. The [earlier screening recovery](docs/screening_recovery.md) documents the first repair. Do not rerun database retrieval for either repair.
 
 Run **`run_slr.py`** to collect/import records, deduplicate, screen titles/abstracts, obtain available full texts, screen complete documents, and export evidence tables. The workflow follows the scope of the PDF in the parent folder. It never aims for a predetermined number of included papers.
 
-**Verification status (21 October 2026):** the offline suite has been run with real network access blocked. It covers synthetic CLI stages, all six provider request/response contracts, pagination, resume, extraction/review gates and configuration checks. The real review, database queries, paper downloads and model inference have **not** been run during verification. Live account/API entitlements and scientific screening accuracy remain unverified. See `docs/offline_verification.md`.
+**Verification status (23 October 2026):** the offline suite has been run with real network access blocked. It covers synthetic CLI stages, all six provider request/response contracts, pagination, resume, extraction/review gates and configuration checks. The real review, database queries, paper downloads and model inference have **not** been run during verification. Live account/API entitlements and scientific screening accuracy remain unverified. See `docs/offline_verification.md`.
 
 ## Folder map
 

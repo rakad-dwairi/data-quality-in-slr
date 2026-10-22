@@ -148,6 +148,40 @@ class SavedResponseTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(self.s.AssessmentError):
                 self.s._validated_response({**self.raw, **change}, self.evidence, "title_abstract", self.names, {}, 32768, 8192)
 
+    def test_downgraded_judgements_expose_original_rationale_and_distinct_issue_counts(self):
+        data = copy.deepcopy(self.data)
+        data["criteria"][0].update(source_attribution="prior_work", quote="Invented synthetic quote.")
+        raw = {**self.raw, "message": {"content": json.dumps(data)}}
+        result = self.s._validated_response(raw, self.evidence, "title_abstract", self.names, {}, 32768, 8192)
+        self.assertEqual(result["ai_decision"], "uncertain")
+        self.assertEqual(result["ai_model_decision"], "include")
+        self.assertEqual(result["ai_model_rationale"], data["rationale"])
+        self.assertIn("Original model rationale (unverified): " + data["rationale"], result["ai_rationale"])
+        self.assertTrue(result["evidence_review_required"])
+        self.assertEqual(result["evidence_downgraded_criteria"], 1)
+        self.assertIn("target_report_attribution_not_established: 1", result["evidence_issue_summary"])
+        self.assertIn("unsupported_or_ambiguous_source_quote: 1", result["evidence_issue_summary"])
+        self.assertEqual(json.loads(result["criteria_json"])[0]["value"], "unclear")
+
+    def test_source_anchor_repair_alone_does_not_claim_unsupported_scientific_judgement(self):
+        data = copy.deepcopy(self.data)
+        data["criteria"][0]["passage_id"] = "INVENTED_PASSAGE_ID"
+        raw = {**self.raw, "message": {"content": json.dumps(data)}}
+        result = self.s._validated_response(raw, self.evidence, "title_abstract", self.names, {}, 32768, 8192)
+        self.assertEqual(result["ai_decision"], "include")
+        self.assertFalse(result["evidence_review_required"])
+        self.assertEqual(result["evidence_downgraded_criteria"], 0)
+        self.assertEqual(result["evidence_issue_summary"], "unique_exact_quote_in_actual_passage: 1")
+
+    def test_csv_exports_current_generation_identity_and_review_diagnostics(self):
+        from slr_pipeline.cli import SCREEN, FULL
+        fields = {"ai_study_kind", "ai_model_decision", "ai_model_rationale", "cache_key",
+                  "assessment_fingerprint", "attempt_id", "assessed_utc", "prompt_version",
+                  "evidence_downgraded_criteria", "evidence_review_required", "evidence_issue_summary"}
+        self.assertTrue(fields.issubset(SCREEN))
+        self.assertTrue(fields.issubset(FULL))
+        self.assertEqual(len(SCREEN), len(set(SCREEN)))
+
     def test_transport_failure_names_timeout_without_exposing_exception_details(self):
         client = self.s.OllamaClient({"name": "synthetic:offline"})
         self.addCleanup(client.close)

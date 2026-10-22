@@ -18,10 +18,11 @@ import requests
 from .common import digest, read_json, utcnow, write_json
 from .evidence import normalize_criteria
 
-PROMPT_VERSION = "2026-10-21.3"
-# Generation identity remains stable: the prompt/schema and model settings have
-# not changed. Deterministic post-processing has its own version and audit.
-EVIDENCE_VALIDATION_VERSION = "2026-10-23.1"
+PROMPT_VERSION = "2026-10-23.2"
+# Attribution/scope guidance and schema descriptions changed. A new generation
+# identity deliberately prevents reuse of replies to the older instructions;
+# original generations and their immutable audit events remain available.
+EVIDENCE_VALIDATION_VERSION = "2026-10-23.2"
 CORE_CRITERIA = (
     "recommender_context", "investigated_data_property", "operational_assessment",
     "eligible_data_object", "primary_research",
@@ -73,14 +74,17 @@ def _criterion_names(stage: str, protocol: dict) -> list[str]:
 
 def _schema(stage: str, names: list[str]) -> dict:
     citation = {
-        "passage_id": {"type": "string"}, "quote": {"type": "string"},
+        "passage_id": {"type": "string", "description": "An exact key from input passages, or empty for unclear evidence."},
+        "quote": {"type": "string", "description": "A short, contiguous, verbatim substring of that passage; no paraphrase or inserted ellipsis."},
     }
     criterion = {
         "type": "object", "additionalProperties": False,
         "properties": {
             "criterion": {"type": "string", "enum": names},
-            "value": {"type": "string", "enum": ["yes", "no", "unclear"]},
-            "source_attribution": {"type": "string", "enum": ["own_study", "prior_work", "unclear"]},
+            "value": {"type": "string", "enum": ["yes", "no", "unclear"],
+                      "description": "yes/no require explicit target-report evidence; an unreported detail is unclear."},
+            "source_attribution": {"type": "string", "enum": ["own_study", "prior_work", "unclear"],
+                                   "description": "Whose work the quoted statement describes, independent of topical eligibility. own_study includes an out-of-scope target report's own aim, method or result."},
             "explanation": {"type": "string"}, **citation,
         },
         "required": ["criterion", "value", "source_attribution", "explanation", "passage_id", "quote"],
@@ -88,7 +92,8 @@ def _schema(stage: str, names: list[str]) -> dict:
     properties = {
         "decision": {"type": "string", "enum": ["include", "exclude", "uncertain", "secondary"]},
         "rationale": {"type": "string"},
-        "study_kind": {"type": "string", "enum": ["primary", "secondary", "non_research", "unclear"]},
+        "study_kind": {"type": "string", "enum": ["primary", "secondary", "non_research", "unclear"],
+                       "description": "Research design, independent of review scope: original target-report analysis/method is primary; explicit literature synthesis is secondary."},
         "criteria": {"type": "array", "items": criterion},
     }
     if stage == "full_text":
@@ -141,22 +146,68 @@ data objects include interactions, user profiles, item attributes/content,
 exposure/logging, context, time, evaluation/candidate sets, synthetic/augmented
 data. Collaborative filtering is not required. ISO terminology is not required.
 The property itself must be investigated by the TARGET REPORT, not merely
-mentioned as background. Distinguish the target study's own methods/results
-from citations to other studies, related-work summaries, definitions and
-illustrative examples. Prior work cannot satisfy positive eligibility or be
-extracted as the target report's empirical findings. Applying an established
-measure within the target study's own investigation can qualify; merely citing
-its inventors cannot. Each criterion must state source_attribution as own_study,
-prior_work or unclear; yes/no are permitted only for own_study evidence.
+mentioned as background. Keep three questions separate:
+1. Attribution: own_study means the target report's own aim, method or result,
+   even if unrelated to recommenders, written in third person, or using an
+   existing method/dataset. prior_work means another study's work described as
+   a citation, related-work summary, definition or illustrative example.
+   Appearing in a paper or describing an unrelated topic does NOT make a
+   statement prior_work. Do not relabel an author's own experiment prior_work.
+2. Study kind: primary means original analysis, experiment, method development
+   or empirical investigation. A paper is primary even when outside this
+   review's topic. secondary requires explicit evidence that the target report
+   surveys/reviews/synthesises prior literature; non_research describes an
+   editorial/commentary without original research. Otherwise use unclear.
+3. Eligibility: assess the criteria below independently. Out-of-scope primary
+   research can fail recommender_context while primary_research is yes.
+Prior work cannot establish definite target-report eligibility or be extracted
+as the target report's empirical findings. Applying an established measure in
+the target report's own investigation can qualify; citing its inventors cannot.
+Each criterion must state own_study, prior_work or unclear; yes/no are permitted
+only for own_study evidence. Never change attribution to justify a decision.
 Qualifying assessment can stand alone without a downstream recommender metric.
 Controlled missingness, corruption, sampling, or bias experiments may qualify.
 Do not equate output-only accuracy, fairness, diversity, or novelty with data
 quality. Pure architecture improvements with incidental sparse-data remarks
 do not establish an investigated data-quality construct.
 
+Criterion meanings:
+- recommender_context: the target report develops, evaluates or investigates a
+  system/task/data for recommending or ranking items for users. A course,
+  content or educational recommender counts even when the title is about
+  teaching. An explicit, self-contained objective/method confined to another
+  task can establish no; simply omitting the word 'recommender' cannot.
+- investigated_data_property: a condition/property of data is itself studied,
+  rather than a background remark or only an output-performance metric.
+- operational_assessment: that property has an explicit measurement, diagnosis,
+  manipulation, validation or empirical analysis; missing method detail is
+  unclear. Improving recommendation accuracy alone does not establish yes.
+- eligible_data_object: the investigated object is the recommender data listed
+  in Scope above. Do not automatically mark this or other criteria no merely
+  because a different criterion failed.
+- primary_research: yes for the target report's original research, including
+  out-of-scope research; no for explicitly secondary or non-research reports.
+
+Examples of reasoning, not source passages to cite:
+- A report says 'We estimate river-water contamination from sensor samples.'
+  Its explicit own aim can support recommender_context=no and its original
+  analysis primary_research=yes; study_kind=primary, not secondary/prior_work.
+- A report says 'We develop a course recommendation system.' This supports
+  recommender_context=yes, own_study. Unreported data-property methods remain
+  unclear, so retain the report as uncertain rather than excluding by its title.
+- 'Smith et al. measured recommendation-data sparsity' describes prior_work;
+  it cannot establish the target report's own investigated_data_property.
+
 Evaluate every requested criterion exactly once using yes/no/unclear. A yes or
-no MUST cite a verbatim quote and supplied passage ID. A missing description is
-unclear, never evidence for no. An unclear item may have empty quote/passage ID.
+no MUST cite a short, contiguous, verbatim substring and the EXACT key from the
+input passages (for example TITLE, ABSTRACT, or a supplied BODY_... key). Never
+invent TITLE_ABSTRACT, numeric IDs, or page labels. Copy all original words,
+punctuation and spacing; do not paraphrase, combine spans, add an ellipsis or
+repair the paper's text. JSON escaping does not change the quoted text.
+A missing description is unclear, never evidence for no. An unclear item may
+have empty quote/passage ID. State the criterion-specific reason, not just that
+the paper is irrelevant. A clear failed criterion may justify exclusion while
+other criteria remain unclear; do not invent five negative findings.
 Use explicit evidence; do not infer peer review, publication type, or language
 from author names, a venue name, a DOI, or an English abstract alone. Assess
 publication scope from the supplied protocol and record uncertain metadata.
@@ -446,6 +497,19 @@ def _attempt_event(run_dir: Path, attempt_id: str, event: str, payload: dict) ->
     return path
 
 
+def _evidence_diagnostics(adjustments: list[dict]) -> dict:
+    downgraded = {item["criterion"] for item in adjustments
+                  if item["action"] == "downgraded_to_unclear" and item["original"]["value"] != "unclear"}
+    issue_counts = {}
+    for item in adjustments:
+        issue_counts[item["reason"]] = issue_counts.get(item["reason"], 0) + 1
+    return {
+        "evidence_downgraded_criteria": len(downgraded),
+        "evidence_review_required": bool(downgraded),
+        "evidence_issue_summary": "; ".join(f"{reason}: {count}" for reason, count in sorted(issue_counts.items())),
+    }
+
+
 def _validated_response(raw_response: dict, evidence: dict, stage: str,
                         names: list[str], protocol: dict, context: int, output: int) -> dict:
     """Check a completed response without inference or invented evidence."""
@@ -461,12 +525,15 @@ def _validated_response(raw_response: dict, evidence: dict, stage: str,
     data, adjustments = normalize_criteria(json.loads(message["content"]), evidence["passages"], stage)
     result = _validate(data, evidence["passages"], stage, names, protocol)
     result.update(evidence_validation_version=EVIDENCE_VALIDATION_VERSION,
-                  evidence_adjustments_json=_json(adjustments))
+                  evidence_adjustments_json=_json(adjustments),
+                  ai_model_decision=data["decision"], ai_model_rationale=data["rationale"],
+                  **_evidence_diagnostics(adjustments))
     if adjustments:
         result["ai_rationale"] = (
             f"Evidence validation recorded {len(adjustments)} citation/criterion adjustments. "
             "Supported source evidence was retained; unsupported judgements remain unclear. "
-            f"The resulting AI proposal is {result['ai_decision']}; interpretation requires review."
+            f"The resulting AI proposal is {result['ai_decision']}; interpretation requires review. "
+            f"Original model rationale (unverified): {data['rationale']}"
         )
     if evidence.get("source_packet"):
         result.update(ai_decision="uncertain", ai_reason_code="UNCERTAIN",
@@ -738,6 +805,9 @@ def _combine_packets(results: list[dict], names: list[str], total: int) -> dict:
         "screening_status": "chunked_complete" if complete else "chunked_partial",
         "evidence_validation_version": EVIDENCE_VALIDATION_VERSION,
         "evidence_adjustments_json": _json(adjustments),
+        **_evidence_diagnostics(adjustments),
+        "ai_model_rationale": "\n".join(f"Packet {index} (unverified): {result['ai_model_rationale']}"
+                                          for index, result in enumerate(results, 1) if result.get("ai_model_rationale")),
         "chunk_count": total, "chunks_completed": len(completed),
         "chunk_fingerprints_json": _json(fingerprints), "chunk_errors_json": _json(errors),
         "assessment_fingerprint": digest({"aggregation_version": PROMPT_VERSION, "packet_fingerprints": fingerprints, "total": total}),

@@ -1,5 +1,7 @@
 # Recover screening without repeating searches
 
+**Later update:** the first bounded retry completed, but three new replies exposed confusion between source attribution, research type and review scope. Use [the new calibration instructions](screening_calibration.md) for the next trial. This page records the earlier recovery; its unchanged-prompt cache reuse claim does not apply to the revised generation prompt.
+
 The supplied Windows samples show valid JSON responses rejected because of invented passage IDs, whitespace differences in quotations, unsupported punctuation/text edits, and definite judgements attributed to prior work. These are evidence-validation failures, not an account quota. The repair separates recoverable source anchors from unsupported scientific judgements.
 
 ## What changed

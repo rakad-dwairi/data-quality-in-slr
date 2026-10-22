@@ -1,6 +1,6 @@
 # Offline verification — 23 October 2026
 
-Latest recovery result: **170 tests passed, 0 failures, 0 errors, 0 blocked network attempts**. The initial verification passed 98 tests; the Scopus recovery suite passed 122. The latest suite also covers conservative evidence normalization, saved-response revalidation, screening recovery, model-outage stops and Windows source snapshots. Verification used Python 3.12, with real socket connections and DNS disabled before discovery.
+Latest result: **195 tests passed, 0 failures, 0 errors, 0 blocked network attempts**. The initial verification passed 98 tests; the Scopus recovery suite passed 122 and the first screening recovery passed 170. The latest suite also covers attribution/scope guidance contracts, original-rationale diagnostics, changed-prompt cache separation, chained recovery and standalone audit exports. Verification used Python 3.12, with real socket connections and DNS disabled before discovery.
 
 ```bash
 source .venv/bin/activate
@@ -60,3 +60,13 @@ All three owner-supplied failed title/abstract responses were replayed offline t
 The 170-test suite covers unique exact passage-ID recovery, unique whitespace-only source spans, rejection of punctuation/paraphrase/ambiguous matches, preserved own-study attribution rules, unchanged strict validation, zero-inference cache recovery, immutable original attempt events, original-run preservation, committed SQLite WAL records, source/artifact tampering, model-outage stops, bounded screening and legacy/new Windows newline handling. Two existing synthetic export fixtures were updated to use a year inside the configured review window; production date criteria were unchanged.
 
 Use [the screening recovery instructions](screening_recovery.md) to prepare a separate run from the Windows donor's frozen configuration and cached evidence, then run a three-assessment trial yourself. No real review pipeline, database search, PDF download or model request was executed during this verification. Live Windows execution and scientific screening accuracy still require the owner's bounded trial and review.
+
+## Revised-prompt calibration after the next three saved replies
+
+The next owner-run trial completed, but all fifteen criterion judgments in the three new replies were marked `prior_work`, including explicit target-report aims and results. The model also called original unrelated research secondary and contradicted an abstract that explicitly develops a course recommendation system. The revised prompt/schema descriptions distinguish attribution, research design and criterion eligibility, with synthetic examples. Strict source validation and the evidence normalizer are unchanged. No unsupported old judgment was upgraded.
+
+Generation prompt version `2026-10-23.2` deliberately separates new replies from every older prompt identity. Synthetic tests show that prompt text and version independently prevent old-label reuse, while source evidence and old checkpoint rows remain intact. Chained recovery retains the donor's model/protocol, retrieval/deduplication evidence, PDFs, extraction caches and audit history. CSV diagnostics now retain the raw model rationale and criterion-adjustment reasons instead of exposing only a generic count.
+
+All three newly supplied replies were replayed with inference forbidden and remained uncertain with five downgraded criteria each. The revised prompt fits all six supplied exact inputs with their original protocol blocks and configured context budget. This tests input handling, not what a live model will answer. The standalone diagnostic exporter was also checked against temporary reconstructions of the three actual saved audits using both old and new CSV columns; it retained exact audit bytes and input identities. Original private sample ZIPs remained unchanged and are not tracked.
+
+The complete 195-test suite includes thirteen synthetic diagnostic-export tests and seven scope/attribution contract tests. These establish implementation behavior; synthetic model replies cannot measure live screening sensitivity or specificity. Use [the eight-assessment calibration instructions](screening_calibration.md), then inspect the actual replies before increasing the limit. No bibliographic or model requests were made during these checks.

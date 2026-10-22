@@ -20,9 +20,12 @@ PROJECT = Path(__file__).resolve().parents[1]
 BIB = ["record_id", "report_id", "study_id", "title", "abstract", "authors", "date", "date_basis", "date_status", "date_window_status", "doi", "related_doi",
        "date_verification_evidence", "date_verified_by", "date_verified_utc",
        "venue", "publication_type", "source", "sources", "url", "oa_pdf_url", "provenance"]
-SCREEN = BIB + ["ai_decision", "ai_reason_code", "ai_rationale", "screening_status", "input_sha256",
-                "criteria_json", "evidence_json", "model", "model_digest", "prompt_sha256",
-                "evidence_validation_version", "evidence_adjustments_json",
+SCREEN = BIB + ["ai_decision", "ai_reason_code", "ai_rationale", "ai_study_kind",
+                "ai_model_decision", "ai_model_rationale", "screening_status", "input_sha256",
+                "criteria_json", "evidence_json", "model", "model_digest", "prompt_version", "prompt_sha256",
+                "cache_key", "assessment_fingerprint", "attempt_id", "assessed_utc",
+                "evidence_validation_version", "evidence_adjustments_json", "evidence_downgraded_criteria",
+                "evidence_review_required", "evidence_issue_summary",
                 "human_decision", "human_reason_code", "human_status", "human_reviewers", "effective_decision"]
 FULL = SCREEN + ["full_text_path", "full_text_sha256", "full_text_file_sha256", "full_text_status", "full_text_error", "text_complete",
                  "chunk_count", "chunks_completed", "chunk_errors_json", "chunk_fingerprints_json",

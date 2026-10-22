@@ -120,6 +120,22 @@ class ScreeningChunkTests(unittest.TestCase):
         self.assertEqual(partial["screening_status"], "chunked_partial")
         self.assertEqual(partial["ai_decision"], "uncertain")
 
+    def test_packet_aggregation_preserves_evidence_review_diagnostics_and_raw_rationales(self):
+        first = self.packet_result(values={"recommender_context": "unclear"})
+        first["ai_model_rationale"] = "Synthetic unverified model rationale."
+        first["evidence_adjustments_json"] = json.dumps([{
+            "action": "downgraded_to_unclear", "criterion": "recommender_context",
+            "reason": "target_report_attribution_not_established",
+            "original": {"value": "no"}, "normalized": {"value": "unclear"},
+        }])
+        combined = self.screening._combine_packets([first], self.names, 1)
+        self.assertEqual(combined["ai_decision"], "uncertain")
+        self.assertTrue(combined["evidence_review_required"])
+        self.assertEqual(combined["evidence_downgraded_criteria"], 1)
+        self.assertEqual(combined["evidence_issue_summary"], "target_report_attribution_not_established: 1")
+        self.assertIn("Packet 1 (unverified): Synthetic unverified model rationale.", combined["ai_model_rationale"])
+        self.assertEqual(json.loads(combined["evidence_adjustments_json"])[0]["packet_index"], 1)
+
     def test_a_pending_packet_blocks_even_an_explicit_exclusion(self):
         first = self.packet_result(values={"recommender_context": "no"})
         second = self.packet_result(status="pending_limit", fingerprint="synthetic_pending")

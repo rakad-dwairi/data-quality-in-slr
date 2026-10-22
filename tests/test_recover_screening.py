@@ -275,6 +275,69 @@ class ScreeningRecoveryTests(unittest.TestCase):
         finally:
             copied.close()
 
+    def test_chained_recovery_retains_evidence_but_changed_prompt_never_reuses_old_labels(self):
+        self.prepare()
+        # A calibration starts from the stopped recovery, with a newly frozen
+        # implementation. Only this temporary synthetic project is changed.
+        code = self.root / "slr_pipeline/screening.py"
+        code.write_bytes(code.read_bytes() + b"\n# Synthetic changed screening prompt implementation.\n")
+        with self.common.run_lock(self.target):
+            pass  # Simulate the completed owner's screening trial.
+        before = self.snapshot(self.target)
+        calibration = self.root / "runs/calibration"
+        config_path = self.root / "config/calibration.json"
+        report = self.recover.prepare_recovery("runs/recovered", "runs/calibration",
+                                              "config/calibration.json", 8, self.root)
+        self.assertEqual(self.snapshot(self.target), before)
+        config = self.cli.load_config(config_path)
+        self.assertEqual(config["model"], self.config["model"])
+        self.assertEqual(config["protocol"], self.config["protocol"])
+        self.assertEqual(config["screening"]["limit"], 8)
+        self.assertTrue(config["screening"]["retry_errors"])
+        self.assertEqual(report["allowed_code_changes"], ["screening.py"])
+        self.assertEqual(report["database_requests"], 0)
+        self.assertEqual(report["model_requests"], 0)
+        for relative, data in before.items():
+            if relative.startswith(("01_retrieval/", "02_deduplication/", "04_full_text/pdfs/",
+                                    "checkpoints/model_audit/", "checkpoints/model_attempts/",
+                                    "checkpoints/fulltext/")):
+                self.assertEqual((calibration / relative).read_bytes(), data)
+        self.assertFalse((calibration / "03_title_abstract").exists())
+        self.assertFalse(self.common.read_json(calibration / "stage_state.json")["screen"]["valid"])
+        self.assertNotEqual(self.common.read_json(calibration / "manifest.json")["fingerprint"],
+                            self.common.read_json(self.target / "manifest.json")["fingerprint"])
+
+        copied = self.screening._open_checkpoint(calibration / "checkpoints/screening.sqlite")
+        try:
+            old = copied.execute("SELECT * FROM assessments WHERE cache_key=?", (self.cached_key,)).fetchone()
+            self.assertIsNotNone(old)
+            old_version = self.screening.PROMPT_VERSION
+            # Either the complete system prompt or its explicit version must
+            # independently invalidate the old generation identity.
+            for system, version in ((self.system + "\nSynthetic calibrated guidance.", old_version),
+                                    (self.system, old_version + ".synthetic-calibration")):
+                with self.subTest(prompt_changed=system != self.system, version_changed=version != old_version), \
+                        mock.patch.object(self.screening, "PROMPT_VERSION", version):
+                    model, budget = SyntheticModel(), {"limit": 8, "attempted": 0}
+                    result = self.screening._assess_input(self.report, "title_abstract", config, calibration,
+                        model, copied, self.evidence, system, self.names,
+                        self.screening._schema("title_abstract", self.names), budget)
+                    self.assertFalse(result["cache_reused"])
+                    self.assertNotEqual(result["cache_key"], self.cached_key)
+                    self.assertEqual(model.calls, 1)
+                    self.assertEqual(budget["attempted"], 1)
+                    cached = self.screening._assess_input(self.report, "title_abstract", config, calibration,
+                        SyntheticModel(forbid=True), copied, self.evidence, system, self.names,
+                        self.screening._schema("title_abstract", self.names), budget)
+                    self.assertTrue(cached["cache_reused"])
+                    self.assertEqual(cached["cache_key"], result["cache_key"])
+                    self.assertEqual(budget["attempted"], 1)
+            self.assertEqual(copied.execute("SELECT * FROM assessments WHERE cache_key=?",
+                                           (self.cached_key,)).fetchone(), old)
+            self.assertEqual(copied.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 4)
+        finally:
+            copied.close()
+
     def test_cli_screen_uses_copied_deduplication_without_collecting_or_fulltext(self):
         self.prepare()
 

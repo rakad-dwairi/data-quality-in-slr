@@ -15,3 +15,4 @@ inputs/date_checks.csv
 screening_failure_samples*.zip
 config/model_probe.json
 config/screening_recovery.json
+config/screening_calibration.json
