@@ -26,6 +26,7 @@ SCREEN = BIB + ["ai_decision", "ai_reason_code", "ai_rationale", "ai_study_kind"
                 "cache_key", "assessment_fingerprint", "attempt_id", "assessed_utc",
                 "evidence_validation_version", "evidence_adjustments_json", "evidence_downgraded_criteria",
                 "evidence_review_required", "evidence_issue_summary",
+                "evidence_omitted_observations", "evidence_appraisals_unclear", "evidence_omitted_iso_proposals",
                 "human_decision", "human_reason_code", "human_status", "human_reviewers", "effective_decision"]
 FULL = SCREEN + ["full_text_path", "full_text_sha256", "full_text_file_sha256", "full_text_status", "full_text_error", "text_complete",
                  "chunk_count", "chunks_completed", "chunk_errors_json", "chunk_fingerprints_json",

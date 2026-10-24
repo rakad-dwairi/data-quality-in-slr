@@ -18,11 +18,11 @@ import requests
 from .common import digest, read_json, utcnow, write_json
 from .evidence import normalize_criteria
 
-PROMPT_VERSION = "2026-10-23.2"
+PROMPT_VERSION = "2026-10-23.3"
 # Attribution/scope guidance and schema descriptions changed. A new generation
 # identity deliberately prevents reuse of replies to the older instructions;
 # original generations and their immutable audit events remain available.
-EVIDENCE_VALIDATION_VERSION = "2026-10-23.2"
+EVIDENCE_VALIDATION_VERSION = "2026-10-23.4"
 CORE_CRITERIA = (
     "recommender_context", "investigated_data_property", "operational_assessment",
     "eligible_data_object", "primary_research",
@@ -204,6 +204,13 @@ input passages (for example TITLE, ABSTRACT, or a supplied BODY_... key). Never
 invent TITLE_ABSTRACT, numeric IDs, or page labels. Copy all original words,
 punctuation and spacing; do not paraphrase, combine spans, add an ellipsis or
 repair the paper's text. JSON escaping does not change the quoted text.
+Prefer a single short source phrase of 5-25 words. Select its passage ID by
+looking at the passage containing those exact words, never by guessing an
+offset from the topic. Do not quote your own explanation or a synthesized
+description of the method. When a useful sentence is long, copy a shorter
+contiguous phrase from it, without dots or rewritten grammar. This applies to
+criteria, extraction and appraisal alike. Reuse one valid quotation when it
+supports multiple criteria; inventing a different formulation is not needed.
 A missing description is unclear, never evidence for no. An unclear item may
 have empty quote/passage ID. State the criterion-specific reason, not just that
 the paper is irrelevant. A clear failed criterion may justify exclusion while
@@ -222,6 +229,11 @@ and the protocol's eligibility constraints. Do not call incomplete text a
 negative scientific finding. Recommend include only if all required criteria
 are yes, exclude only for an explicitly evidenced failed criterion, secondary
 only for explicitly evidenced secondary research; otherwise uncertain.
+For full_text_sufficient, cite actual BODY text describing the target study's
+methods or results. An example is a literal phrase describing an experiment,
+sampling procedure or evaluated method. Availability metadata is not a source
+quotation: never write 'All source text provided' or invent a BODY key spanning
+the whole document. Judge this criterion from substantive supplied content.
 
 For full_text extraction, keep data condition, measure, intervention, and
 recommender outcome separate. Extract only facts explicitly supported by a
@@ -503,9 +515,15 @@ def _evidence_diagnostics(adjustments: list[dict]) -> dict:
     issue_counts = {}
     for item in adjustments:
         issue_counts[item["reason"]] = issue_counts.get(item["reason"], 0) + 1
+    omissions = sum(item["action"] == "extraction_observation_omitted" for item in adjustments)
+    unclear_appraisals = sum(item["action"] == "appraisal_downgraded_to_unclear" for item in adjustments)
+    omitted_mappings = sum(item["action"] == "iso_proposal_omitted" for item in adjustments)
     return {
         "evidence_downgraded_criteria": len(downgraded),
-        "evidence_review_required": bool(downgraded),
+        "evidence_review_required": bool(downgraded or omissions or unclear_appraisals or omitted_mappings),
+        "evidence_omitted_observations": omissions,
+        "evidence_appraisals_unclear": unclear_appraisals,
+        "evidence_omitted_iso_proposals": omitted_mappings,
         "evidence_issue_summary": "; ".join(f"{reason}: {count}" for reason, count in sorted(issue_counts.items())),
     }
 
@@ -531,7 +549,7 @@ def _validated_response(raw_response: dict, evidence: dict, stage: str,
     if adjustments:
         result["ai_rationale"] = (
             f"Evidence validation recorded {len(adjustments)} citation/criterion adjustments. "
-            "Supported source evidence was retained; unsupported judgements remain unclear. "
+            "Supported evidence was retained; unsupported criteria/appraisals remain unclear and unsupported facts/mappings were omitted. "
             f"The resulting AI proposal is {result['ai_decision']}; interpretation requires review. "
             f"Original model rationale (unverified): {data['rationale']}"
         )
@@ -548,7 +566,7 @@ def _revalidate_cached_response(cached, record, stage, config, run_dir, client, 
     Original request/finished events remain immutable. A separate event records
     the new validator's interpretation; no model call or call budget is used.
     """
-    if cached[0] != "model_or_validation_error":
+    if cached[0] not in {"model_or_validation_error", "assessed"}:
         return None
     audit_path = Path(run_dir) / "checkpoints/model_audit" / f"{fingerprint}.json"
     try:
@@ -567,13 +585,14 @@ def _revalidate_cached_response(cached, record, stage, config, run_dir, client, 
     except (OSError, AssessmentError, ValueError, TypeError, KeyError, OverflowError):
         return None
     timestamp, revalidation_id = utcnow(), uuid4().hex
+    generation_created = old_result.get("generation_created_utc", cached[4])
     result.update(attempt_id=old_result.get("attempt_id", audit.get("attempt_id", "")),
                   assessed_utc=timestamp, revalidation_id=revalidation_id,
-                  generation_created_utc=cached[4], cached_response_revalidated=True)
+                  generation_created_utc=generation_created, cached_response_revalidated=True)
     event = {"record_id": str(record["record_id"]), "stage": stage,
              "operation": "saved_response_revalidation", "created_at": timestamp,
              **provenance, "model": client.model, "prompt_version": PROMPT_VERSION,
-             "generation_attempt_id": result["attempt_id"], "generation_created_utc": cached[4],
+             "generation_attempt_id": result["attempt_id"], "generation_created_utc": generation_created,
              "source_status": cached[0], "source_error": cached[3],
              "input_evidence": evidence, "system_prompt": system_text,
              "raw_response": raw, "result": result, "error": "",
@@ -604,7 +623,8 @@ def _assess_input(record: dict, stage: str, config: dict, run_dir: Path,
         "cache_key": fingerprint, "prompt_sha256": prompt_hash,
     }
     cached = db.execute("SELECT status,result_json,raw_response,error,created_at FROM assessments WHERE cache_key=?", (fingerprint,)).fetchone()
-    if cached and (cached[0] == "assessed" or not config.get("screening", {}).get("retry_errors", True)):
+    current_validation = cached and json.loads(cached[1]).get("evidence_validation_version") == EVIDENCE_VALIDATION_VERSION
+    if cached and ((cached[0] == "assessed" and current_validation) or not config.get("screening", {}).get("retry_errors", True)):
         return {**json.loads(cached[1]), **provenance, "cache_reused": True}
     if cached:
         recovered = _revalidate_cached_response(cached, record, stage, config, run_dir, client, db,

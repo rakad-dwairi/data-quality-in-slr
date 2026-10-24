@@ -8,6 +8,7 @@ the strict validator rather than being converted into valid-looking replies.
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 
 
 _VALUES = {"yes", "no", "unclear"}
@@ -16,6 +17,11 @@ _BODY_REQUIRED = {
     "investigated_data_property", "operational_assessment", "full_text_sufficient",
 }
 _FIELDS = ("criterion", "value", "source_attribution", "explanation", "passage_id", "quote")
+_ENTITIES = {"study", "dataset", "data_object", "measure", "validation", "outcome"}
+_APPRAISAL_DOMAINS = {"construct_clarity", "measurement_transparency", "reference_appropriateness",
+                      "design_strength", "confounding_control", "evaluation_validity", "statistical_evidence",
+                      "robustness", "generalisability", "reproducibility"}
+_RELATIONSHIPS = {"explicit", "supported", "tentative", "proxy_non_equivalent", "unsupported"}
 
 
 def _snapshot(criterion: dict) -> dict:
@@ -71,13 +77,45 @@ def _unique_whitespace_span(text: str, quote: str) -> tuple[int, int] | None:
     return offsets[start], offsets[end - 1] + 1
 
 
+def _unique_ellipsis_span(text: str, quote: str) -> tuple[int, int] | None:
+    """Restore omitted source context between unique ordered prose fragments.
+
+    Every non-ellipsis character must match (allowing whitespace only). Short,
+    ambiguous, reordered, overlapping or widely separated fragments are refused.
+    The result is the entire original span, never a stitched quotation.
+    """
+    fragments = re.split(r"\.{3}|\u2026", quote)
+    if not 2 <= len(fragments) <= 4:
+        return None
+    fragments = [part.strip() for part in fragments]
+    if any(len(re.sub(r"\s", "", part)) < 12 or len(part.split()) < 3 for part in fragments):
+        return None
+    spans = [_unique_whitespace_span(text, part) for part in fragments]
+    if any(span is None for span in spans):
+        return None
+    if any(right[0] < left[1] or right[0] - left[1] > 1000 for left, right in zip(spans, spans[1:])):
+        return None
+    start, end = spans[0][0], spans[-1][1]
+    return (start, end) if end - start <= 3000 else None
+
+
+def _known_passage_span(text, quote):
+    span = _unique_whitespace_span(text, quote)
+    if span is not None:
+        return span, "unique_whitespace_only_original_span"
+    span = _unique_ellipsis_span(text, quote)
+    return span, "unique_ordered_ellipsis_original_span"
+
+
 def normalize_criteria(data, passages, stage):
     """Return ``(deepcopy_of_data, adjustments)`` without deciding eligibility.
 
     A mismatched quote can be anchored only in either of these bounded ways:
     an unknown passage ID with a unique literal quote occurrence, or a known
-    passage with one unique whitespace-only source span.  These two repairs are
-    not combined.  An already valid quote is retained unchanged.
+    passage with one unique whitespace-only source span. Explicit ellipses may
+    also identify unique ordered prose fragments in that same passage; omitted
+    context is restored as the full contiguous original span. Unknown-ID and
+    approximate-anchor guesses are not combined. Valid quotes are unchanged.
 
     Unsupported evidence and definite judgements attributed to prior/unclear
     work become ``unclear``.  Attribution is never relabelled.  Invalid citations
@@ -132,14 +170,14 @@ def normalize_criteria(data, passages, stage):
                           {"passage_id": corrected_id, "start": start, "end": end,
                            "text": passages[corrected_id][start:end]})
             else:
-                span = _unique_whitespace_span(passages[passage_id], quote)
+                span, repair_reason = _known_passage_span(passages[passage_id], quote)
                 if span is not None:
                     start, end = span
                     original_span = passages[passage_id][start:end]
                     before = _snapshot(criterion)
                     criterion["quote"] = original_span
                     supported = True
-                    audit("quote_anchor_repaired", "unique_whitespace_only_original_span", before,
+                    audit("quote_anchor_repaired", repair_reason, before,
                           {"passage_id": passage_id, "start": start, "end": end,
                            "text": original_span})
 
@@ -156,4 +194,53 @@ def normalize_criteria(data, passages, stage):
             criterion.update(value="unclear", passage_id="", quote="")
             audit("downgraded_to_unclear", "full_text_body_evidence_required", before)
 
+    # Do not discard an otherwise usable packet because one observation lacks
+    # source support. Omit unsupported facts/mappings, and leave unsupported
+    # appraisal judgements unclear. Structural errors still reach the validator.
+    for group in ("extraction", "appraisal", "iso_mapping"):
+        items = normalized.get(group)
+        if not isinstance(items, list):
+            continue
+        retained = []
+        for index, item in enumerate(items):
+            valid = isinstance(item, dict) and all(isinstance(item.get(key), str) for key in ("passage_id", "quote"))
+            if valid and group == "extraction":
+                valid = item.get("entity_type") in _ENTITIES and isinstance(item.get("entity_label"), str) and isinstance(item.get("fields"), dict) and all(isinstance(v, str) for v in item["fields"].values())
+            elif valid and group == "appraisal":
+                valid = item.get("domain") in _APPRAISAL_DOMAINS and item.get("rating") in {"yes", "partly", "no", "not_applicable", "unclear"} and isinstance(item.get("justification"), str)
+            elif valid:
+                valid = item.get("relationship") in _RELATIONSHIPS and all(isinstance(item.get(key), str) for key in ("construct", "characteristic", "justification"))
+            if not valid:
+                retained.append(item)
+                continue
+            passage_id, quote = item.get("passage_id"), item.get("quote")
+            supported = bool(quote.strip()) and quote in passages.get(passage_id, "")
+            if not supported and quote.strip() and passage_id in passages:
+                span, reason = _known_passage_span(passages[passage_id], quote)
+                if span is not None:
+                    start, end = span
+                    before = {"passage_id": passage_id, "quote": quote}
+                    item["quote"] = passages[passage_id][start:end]
+                    supported = True
+                    adjustments.append({"criterion": f"{group}[{index}]", "citation_path": [group, index],
+                                        "action": "quote_anchor_repaired", "reason": reason,
+                                        "original": before, "normalized": {"passage_id": passage_id, "quote": item["quote"]},
+                                        "source_span": {"passage_id": passage_id, "start": start, "end": end, "text": item["quote"]}})
+            needs_citation = group != "appraisal" or item["rating"] != "unclear" or bool(quote.strip())
+            non_target = group == "extraction" and item["fields"].get("source_attribution") != "own_study"
+            if (needs_citation and not supported) or non_target:
+                before = deepcopy(item)
+                reason = "target_report_attribution_not_established" if non_target else "unsupported_or_ambiguous_source_quote"
+                action = {"extraction": "extraction_observation_omitted", "iso_mapping": "iso_proposal_omitted",
+                          "appraisal": "appraisal_downgraded_to_unclear"}[group]
+                if group == "appraisal":
+                    item.update(rating="unclear", passage_id="", quote="",
+                                justification="Source support was not verified; the original model judgement remains in the audit.")
+                    retained.append(item)
+                adjustments.append({"criterion": f"{group}[{index}]", "citation_path": [group, index],
+                                    "action": action, "reason": reason, "original": before,
+                                    "normalized": deepcopy(item) if group == "appraisal" else None})
+            else:
+                retained.append(item)
+        normalized[group] = retained
     return normalized, adjustments

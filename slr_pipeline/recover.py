@@ -284,12 +284,14 @@ def _initialize_current(config, staging, root):
                "scientific_status": "Screening recovery; original protocol is unchanged and scientific review remains pending."})
 
 
-def prepare_recovery(source_run, run_directory, config_out, limit=3, project=None):
+def prepare_recovery(source_run, run_directory, config_out, limit=3, project=None, context_tokens=None):
     """Freeze a new screening run from stopped local evidence; never run stages."""
     from .cli import PROJECT
 
     if type(limit) is not int or limit < 0:
         raise ValueError("The screening limit must be a nonnegative integer; zero means all pending work.")
+    if context_tokens is not None and (type(context_tokens) is not int or context_tokens <= 0):
+        raise ValueError("The context override must be a positive integer.")
     root = Path(project if project is not None else PROJECT).expanduser().resolve()
     source, target, config_path = (_path(root, value) for value in (source_run, run_directory, config_out))
     if source == target or source in target.parents or target in source.parents:
@@ -310,6 +312,11 @@ def prepare_recovery(source_run, run_directory, config_out, limit=3, project=Non
         if _exists(pdfs):
             _tree_files(pdfs)
         config = copy.deepcopy(manifest["config"])
+        original_context = config["model"]["context_tokens"]
+        if context_tokens is not None:
+            if context_tokens <= config["model"]["max_output_tokens"] + 2048:
+                raise ValueError("The context override must leave more than 2048 tokens beyond the output reserve.")
+            config["model"]["context_tokens"] = context_tokens
         config["run_directory"] = str(run_directory)
         config["screening"].update(limit=limit, retry_errors=True)
         config["_project_dir"] = str(root)
@@ -350,6 +357,9 @@ def prepare_recovery(source_run, run_directory, config_out, limit=3, project=Non
                       "copied_files": records, "files": inventory,
                       "database_requests": 0, "model_requests": 0, "pipeline_stages_executed": 0,
                       "screening_limit": limit,
+                      "context_override": None if context_tokens is None else {
+                          "previous": original_context, "current": context_tokens,
+                          "note": "Changed context creates a different model-generation identity; saved replies are not silently reused across it."},
                       "note": "Only completed retrieval/deduplication state and local caches were reused. Screening labels were not imported; final inclusion and scientific review remain pending."}
             write_json(staging / "screening_recovery.json", report)
             if _exists(target) or _exists(config_path):
@@ -380,9 +390,12 @@ def main(argv=None):
     parser.add_argument("--run-directory", default="runs/database_review_screening_recovery")
     parser.add_argument("--config-out", default="config/screening_recovery.json")
     parser.add_argument("--limit", type=int, default=3)
+    parser.add_argument("--context-tokens", type=int, default=None,
+                        help="Optional new local model context; retrieval and PDF caches remain reusable.")
     args = parser.parse_args(argv)
     try:
-        report = prepare_recovery(args.from_run, args.run_directory, args.config_out, args.limit)
+        report = prepare_recovery(args.from_run, args.run_directory, args.config_out, args.limit,
+                                  context_tokens=args.context_tokens)
         print("Prepared recovery config: " + report["config_out"])
         print("Recovery run: " + report["run_directory"])
         print("Original run preserved. No database/model requests or pipeline stages executed.")

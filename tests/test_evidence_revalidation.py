@@ -120,6 +120,18 @@ class SavedResponseTests(unittest.TestCase):
         self.assertFalse(list((self.root / "checkpoints/model_attempts").glob("*_revalidated.json")))
         self.client.call.assert_not_called()
 
+    def test_stale_assessed_policy_revalidates_without_inference_and_preserves_generation_time(self):
+        self.seed_old_failure()
+        first = self.call()
+        with mock.patch.object(self.s, "EVIDENCE_VALIDATION_VERSION", "SYNTHETIC_UPDATED_POLICY"):
+            second = self.call()
+            self.assertNotEqual(first["revalidation_id"], second["revalidation_id"])
+            self.assertEqual(second["generation_created_utc"], first["generation_created_utc"])
+            self.assertEqual(second["evidence_validation_version"], "SYNTHETIC_UPDATED_POLICY")
+            self.assertEqual(self.call()["revalidation_id"], second["revalidation_id"])
+        self.assertEqual(self.budget["attempted"], 0)
+        self.client.call.assert_not_called()
+
     def test_structural_error_remains_failed_and_does_not_bypass_limit(self):
         data = copy.deepcopy(self.data)
         data["criteria"].pop()

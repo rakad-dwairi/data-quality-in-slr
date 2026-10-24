@@ -1,5 +1,9 @@
 # RecSys data-quality SLR
 
+The owner-authorised Mac completion is described in [local completion](docs/local_completion.md). It uses the saved search caches and a loopback-only model; the long processing runs in Python without per-paper Codex requests.
+
+The active Mac run now uses a [faster pending-only continuation](docs/faster_local_continuation.md), retaining original completed assessments and full-text reviews. Its resume command and model comparison are documented there.
+
 For the latest Windows screening samples, use [the eight-assessment calibration](docs/screening_calibration.md). The saved replies confuse a paper's own work, research type and topical eligibility; the revised prompt needs a new bounded trial. Completed searches, PDFs and audit history are retained. The [earlier screening recovery](docs/screening_recovery.md) documents the first repair. Do not rerun database retrieval for either repair.
 
 Run **`run_slr.py`** to collect/import records, deduplicate, screen titles/abstracts, obtain available full texts, screen complete documents, and export evidence tables. The workflow follows the scope of the PDF in the parent folder. It never aims for a predetermined number of included papers.

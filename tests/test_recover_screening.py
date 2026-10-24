@@ -167,11 +167,35 @@ class ScreeningRecoveryTests(unittest.TestCase):
         return {str(path.relative_to(folder)): path.read_bytes()
                 for path in folder.rglob("*") if path.is_file()}
 
-    def prepare(self, limit=3):
+    def prepare(self, limit=3, context_tokens=None):
         with mock.patch.object(self.cli, "load_env", side_effect=AssertionError("Recovery must not load credentials")), \
                 mock.patch("slr_pipeline.checks.env_values", side_effect=AssertionError("Recovery must not read .env")), \
                 mock.patch("os.getenv", side_effect=AssertionError("Recovery must not read API keys")):
-            return self.recover.prepare_recovery("runs/windows_donor", "runs/recovered", "config/recovery.json", limit, self.root)
+            return self.recover.prepare_recovery("runs/windows_donor", "runs/recovered", "config/recovery.json", limit, self.root,
+                                                 context_tokens=context_tokens)
+
+    def test_explicit_context_override_preserves_collected_inputs_and_is_frozen(self):
+        before = self.snapshot(self.source)
+        report = self.prepare(context_tokens=131072)
+        recovered = self.common.read_json(self.config_out)
+        self.assertEqual(recovered["model"]["context_tokens"], 131072)
+        self.assertEqual(self.common.read_json(self.target / "manifest.json")["config"]["model"]["context_tokens"], 131072)
+        self.assertEqual(report["context_override"]["previous"], 32768)
+        self.assertEqual(report["context_override"]["current"], 131072)
+        self.assertEqual(self.snapshot(self.source), before)
+        for relative, content in before.items():
+            if relative.startswith(("01_retrieval/", "02_deduplication/", "04_full_text/pdfs/")):
+                self.assertEqual((self.target / relative).read_bytes(), content)
+        self.assertTrue(self.cli.validate_stage(self.target, "retrieve"))
+        self.assertTrue(self.cli.validate_stage(self.target, "deduplicate"))
+        self.assertEqual(report["model_requests"], 0)
+
+    def test_invalid_context_overrides_refuse_without_outputs(self):
+        for value in (True, -1, 0, 4096, 6144, "131072"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "context override"):
+                self.prepare(context_tokens=value)
+            self.assertFalse(self.target.exists())
+            self.assertFalse(self.config_out.exists())
 
     def assert_refused(self, message):
         before = self.snapshot(self.source)

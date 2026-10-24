@@ -1,6 +1,8 @@
 # Offline verification — 23 October 2026
 
-Latest result: **195 tests passed, 0 failures, 0 errors, 0 blocked network attempts**. The initial verification passed 98 tests; the Scopus recovery suite passed 122 and the first screening recovery passed 170. The latest suite also covers attribution/scope guidance contracts, original-rationale diagnostics, changed-prompt cache separation, chained recovery and standalone audit exports. Verification used Python 3.12, with real socket connections and DNS disabled before discovery.
+Latest result: **237 tests passed, 0 failures, 0 errors, 0 blocked network attempts**. The initial verification passed 98 tests; the Scopus recovery suite passed 122 and the first screening recovery passed 170. The latest suite also covers attribution/scope guidance contracts, original-rationale diagnostics, changed-prompt cache separation, chained recovery, standalone audit exports, bounded evidence normalization, source-unsupported extraction/appraisal handling, context overrides and local completion gates. Verification used Python 3.12, with real socket connections and DNS disabled before discovery.
+
+The owner subsequently authorised live four-source collection and local-only model screening on the Mac. That separate activity is documented in [local completion](local_completion.md); it is not part of the network-blocked test suite described here.
 
 ```bash
 source .venv/bin/activate
